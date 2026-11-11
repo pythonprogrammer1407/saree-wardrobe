@@ -51,7 +51,7 @@ export function nearestPaletteColor(r: number, g: number, b: number): ColorKey {
  * palette colour each pixel is nearest to, and returns the top colours by share.
  * It's a suggestion — the person confirms with one tap.
  */
-export async function suggestColors(file: Blob): Promise<{ key: ColorKey; share: number }[]> {
+export async function suggestColors(file: Blob): Promise<{ key: ColorKey; share: number; hex: string }[]> {
   const bitmap = await loadBitmap(file)
   const size = 80
   const canvas = document.createElement('canvas')
@@ -65,13 +65,17 @@ export async function suggestColors(file: Blob): Promise<{ key: ColorKey; share:
 
   const { data } = ctx.getImageData(0, 0, size, size)
   const counts = new Map<ColorKey, number>()
+  const groups = new Map<ColorKey, number[]>()
   for (let i = 0; i < data.length; i += 4) {
     const key = nearestPaletteColor(data[i], data[i + 1], data[i + 2])
     counts.set(key, (counts.get(key) ?? 0) + 1)
+    const g = groups.get(key) ?? []
+    g.push(i)
+    groups.set(key, g)
   }
   const total = size * size
   return [...counts.entries()]
-    .map(([key, n]) => ({ key, share: n / total }))
+    .map(([key, n]) => ({ key, share: n / total, hex: medianHex(data, groups.get(key)!) }))
     .sort((a, b) => b.share - a.share)
     .filter((c) => c.share >= 0.03)
 }
@@ -85,7 +89,12 @@ const ZARI_OR_NEUTRAL = new Set<ColorKey>(['gold', 'silver', 'grey', 'black', 'w
  * makes up at least a fifth of the patch it wins over zari / neutral threads
  * (a teal border woven with gold zari reads as teal, not gold or grey).
  */
-export async function prepareSampler(file: Blob): Promise<(fx: number, fy: number) => ColorKey> {
+export interface Picked {
+  key: ColorKey
+  hex: string
+}
+
+export async function prepareSampler(file: Blob): Promise<(fx: number, fy: number) => Picked> {
   const bitmap = await loadBitmap(file)
   const w = Math.min(1000, bitmap.width)
   const h = Math.max(1, Math.round((bitmap.height * w) / bitmap.width))
@@ -102,18 +111,24 @@ export async function prepareSampler(file: Blob): Promise<(fx: number, fy: numbe
     const cy = Math.round(fy * (h - 1))
     const r = Math.max(4, Math.round(w / 60))
     const counts = new Map<ColorKey, number>()
+    const pixels = new Map<ColorKey, number[]>()
     let total = 0
     for (let y = Math.max(0, cy - r); y <= Math.min(h - 1, cy + r); y++) {
       for (let x = Math.max(0, cx - r); x <= Math.min(w - 1, cx + r); x++) {
         const i = (y * w + x) * 4
         const key = nearestPaletteColor(data[i], data[i + 1], data[i + 2])
         counts.set(key, (counts.get(key) ?? 0) + 1)
+        const px = pixels.get(key) ?? []
+        px.push(i)
+        pixels.set(key, px)
         total++
       }
     }
     const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1])
     const colourful = ranked.find(([k]) => !ZARI_OR_NEUTRAL.has(k))
-    return colourful && colourful[1] / total >= 0.2 ? colourful[0] : ranked[0][0]
+    const key = colourful && colourful[1] / total >= 0.2 ? colourful[0] : ranked[0][0]
+    // Exact shade = median of only the pixels that belong to the winning colour (zari threads excluded).
+    return { key, hex: medianHex(data, pixels.get(key)!) }
   }
 }
 
@@ -126,4 +141,17 @@ export function paletteDistance(a: ColorKey, b: ColorKey): number {
   const lb = LAB_BY_KEY.get(b)
   if (!la || !lb) return Infinity // "multi" only matches itself
   return dist(la, lb)
+}
+
+function medianHex(data: Uint8ClampedArray, idx: number[]): string {
+  const med = (o: number) => {
+    const v = idx.map((i) => data[i + o]).sort((a, b) => a - b)
+    return v[v.length >> 1]
+  }
+  return '#' + [med(0), med(1), med(2)].map((n) => n.toString(16).padStart(2, '0')).join('')
+}
+
+/** Perceptual difference between two exact shades (CIE76 ΔE). Under ~10 looks like the same shade. */
+export function shadeDistance(a: string, b: string): number {
+  return dist(rgbToLab(...hexToRgb(a)), rgbToLab(...hexToRgb(b)))
 }

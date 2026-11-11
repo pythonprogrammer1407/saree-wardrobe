@@ -16,6 +16,8 @@ export interface Saree {
   weave: string | null
   body_color: ColorKey | null
   border_color: ColorKey | null
+  body_hex: string | null // exact shade tapped on the photo; null = chosen from palette
+  border_hex: string | null
   occasions: string[]
   stored_in: string | null
   blouse: Blouse | null

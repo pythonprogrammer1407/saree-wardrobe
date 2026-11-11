@@ -44,6 +44,8 @@ create table if not exists public.sarees (
   weave         text,
   body_color    text references public.colors (key),
   border_color  text references public.colors (key),
+  body_hex      text check (body_hex ~ '^#[0-9a-f]{6}$'),   -- exact shade tapped on the photo
+  border_hex    text check (border_hex ~ '^#[0-9a-f]{6}$'),
   occasions     text[] not null default '{}',
   stored_in     text,
   blouse        text check (blouse in ('stitched', 'unstitched', 'none')),

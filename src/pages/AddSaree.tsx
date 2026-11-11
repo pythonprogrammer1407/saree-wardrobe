@@ -4,7 +4,7 @@ import { colorBg, colorName } from '../components/Swatch'
 import { imageUrl, uploadImage } from '../lib/cloudinary'
 import { FABRICS, OCCASIONS } from '../lib/filters'
 import { PALETTE, type ColorKey } from '../lib/colors'
-import { prepareSampler, suggestColors } from '../lib/colorDetect'
+import { prepareSampler, suggestColors, type Picked } from '../lib/colorDetect'
 import { resizeImage } from '../lib/image'
 import { createSaree, fetchStorageSpots, updateSaree } from '../lib/sarees'
 import type { Blouse, Saree } from '../lib/types'
@@ -44,12 +44,15 @@ export function SareeForm({ initial }: { initial?: Saree }) {
   const [suggested, setSuggested] = useState<ColorKey[]>([])
   const [body, setBody] = useState<ColorKey | null>(initial?.body_color ?? null)
   const [border, setBorder] = useState<ColorKey | null>(initial?.border_color ?? null)
+  // Exact shades from tapping the photo; null when a colour is chosen from the palette grid.
+  const [bodyHex, setBodyHex] = useState<string | null>(initial?.body_hex ?? null)
+  const [borderHex, setBorderHex] = useState<string | null>(initial?.border_hex ?? null)
   // When editing, keep the saved colours unless the person picks new ones.
   const touched = useRef({
     body: Boolean(initial?.body_color),
     border: Boolean(initial?.border_color),
   })
-  const [sampler, setSampler] = useState<((fx: number, fy: number) => ColorKey) | null>(null)
+  const [sampler, setSampler] = useState<((fx: number, fy: number) => Picked) | null>(null)
   const [picking, setPicking] = useState<'body' | 'border'>('body')
   const [marks, setMarks] = useState<{
     body?: [number, number]
@@ -97,8 +100,14 @@ export function SareeForm({ initial }: { initial?: Saree }) {
             if (cancelled) return
             const keys = found.map((f) => f.key)
             setSuggested(keys)
-            if (!touched.current.body && keys[0]) setBody(keys[0])
-            if (!touched.current.border && keys[1]) setBorder(keys[1])
+            if (!touched.current.body && keys[0]) {
+              setBody(keys[0])
+              setBodyHex(found[0].hex)
+            }
+            if (!touched.current.border && keys[1]) {
+              setBorder(keys[1])
+              setBorderHex(found[1].hex)
+            }
           })
           .catch(() => setSuggested([]))
         prepareSampler(coverFile)
@@ -145,15 +154,17 @@ export function SareeForm({ initial }: { initial?: Saree }) {
     const rect = e.currentTarget.getBoundingClientRect()
     const fx = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
     const fy = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height))
-    const key = sampler(fx, fy)
+    const { key, hex } = sampler(fx, fy)
     if (picking === 'body') {
       touched.current.body = true
       setBody(key)
+      setBodyHex(hex)
       setMarks((m) => ({ ...m, body: [fx, fy] }))
       setPicking('border')
     } else {
       touched.current.border = true
       setBorder(key)
+      setBorderHex(hex)
       setMarks((m) => ({ ...m, border: [fx, fy] }))
     }
   }
@@ -188,6 +199,8 @@ export function SareeForm({ initial }: { initial?: Saree }) {
         weave: weave.trim() || null,
         body_color: body,
         border_color: border,
+        body_hex: body ? bodyHex : null,
+        border_hex: border ? borderHex : null,
         occasions,
         stored_in: storedIn.trim() || null,
         blouse,
@@ -343,9 +356,9 @@ export function SareeForm({ initial }: { initial?: Saree }) {
         ) : (
           <p className="-mt-1.5 mb-2.5 text-[13px] text-muted">Add a photo for suggestions, or pick below.</p>
         )}
-        <ColorRow label="Body" value={body} suggested={suggested} onPick={(k) => ((touched.current.body = true), setBody(k))} />
+        <ColorRow label="Body" value={body} suggested={suggested} onPick={(k) => ((touched.current.body = true), setBody(k), setBodyHex(null))} />
         <div className="h-4" />
-        <ColorRow label="Border" value={border} suggested={suggested} onPick={(k) => ((touched.current.border = true), setBorder(k))} />
+        <ColorRow label="Border" value={border} suggested={suggested} onPick={(k) => ((touched.current.border = true), setBorder(k), setBorderHex(null))} />
 
         <SectionTitle>Details</SectionTitle>
         <div className="flex flex-col gap-3.5">

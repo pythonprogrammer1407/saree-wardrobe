@@ -35,6 +35,8 @@ export interface NewSaree {
   weave: string | null
   body_color: string | null
   border_color: string | null
+  body_hex: string | null
+  border_hex: string | null
   occasions: string[]
   stored_in: string | null
   blouse: 'stitched' | 'unstitched' | 'none' | null
