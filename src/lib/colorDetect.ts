@@ -75,3 +75,36 @@ export async function suggestColors(file: Blob): Promise<{ key: ColorKey; share:
     .sort((a, b) => b.share - a.share)
     .filter((c) => c.share >= 0.03)
 }
+
+/**
+ * Prepare a tap-to-pick sampler for a photo. The returned function takes a tap position
+ * as fractions of the image (0–1) and returns the palette colour most common in a small
+ * patch around it — a patch vote copes with zari, where neighbouring threads differ.
+ */
+export async function prepareSampler(file: Blob): Promise<(fx: number, fy: number) => ColorKey> {
+  const bitmap = await loadBitmap(file)
+  const w = 300
+  const h = Math.max(1, Math.round((bitmap.height * w) / bitmap.width))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+  ctx.drawImage(bitmap, 0, 0, w, h)
+  bitmap.close()
+  const { data } = ctx.getImageData(0, 0, w, h)
+
+  return (fx, fy) => {
+    const cx = Math.round(fx * (w - 1))
+    const cy = Math.round(fy * (h - 1))
+    const r = 6
+    const counts = new Map<ColorKey, number>()
+    for (let y = Math.max(0, cy - r); y <= Math.min(h - 1, cy + r); y++) {
+      for (let x = Math.max(0, cx - r); x <= Math.min(w - 1, cx + r); x++) {
+        const i = (y * w + x) * 4
+        const key = nearestPaletteColor(data[i], data[i + 1], data[i + 2])
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  }
+}

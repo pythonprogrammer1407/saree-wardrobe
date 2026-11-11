@@ -11,13 +11,29 @@ create table if not exists public.colors (
 );
 
 insert into public.colors (key, name, hex, sort) values
-  ('red','Red','#b3202a',1), ('maroon','Maroon','#6d1a24',2), ('pink','Pink','#e07a9a',3),
-  ('orange','Orange','#e0782f',4), ('mustard','Mustard','#c9962b',5), ('green','Green','#3f7d3a',6),
-  ('teal','Teal','#1f7a78',7), ('blue','Blue','#2f5aa8',8), ('navy','Navy','#1f2a4d',9),
-  ('purple','Purple','#6a3d8f',10), ('cream','Cream','#efe4cc',11), ('white','White','#ffffff',12),
-  ('grey','Grey','#8a8a8a',13), ('black','Black','#1a1a1a',14), ('gold','Gold','#c8a24a',15),
-  ('silver','Silver','#c4c7cc',16), ('multi','Multi','#999999',17)
-on conflict (key) do nothing;
+  ('red','Red','#b3202a',1),
+  ('maroon','Maroon','#6d1a24',2),
+  ('rani','Rani pink','#c2185b',3),
+  ('pink','Pink','#e07a9a',4),
+  ('orange','Orange','#e0782f',5),
+  ('mustard','Mustard','#c9962b',6),
+  ('olive','Olive','#6b6b3a',7),
+  ('green','Green','#3f7d3a',8),
+  ('bottlegreen','Bottle green','#1e4d36',9),
+  ('seagreen','Sea green','#5bb8a0',10),
+  ('teal','Teal','#1f7a78',11),
+  ('peacock','Peacock blue','#0f6283',12),
+  ('blue','Blue','#2f5aa8',13),
+  ('navy','Navy','#1f2a4d',14),
+  ('purple','Purple','#6a3d8f',15),
+  ('cream','Cream','#efe4cc',16),
+  ('white','White','#ffffff',17),
+  ('grey','Grey','#8a8a8a',18),
+  ('black','Black','#1a1a1a',19),
+  ('gold','Gold','#c8a24a',20),
+  ('silver','Silver','#c4c7cc',21),
+  ('multi','Multi','#999999',22)
+on conflict (key) do update set name = excluded.name, hex = excluded.hex, sort = excluded.sort;
 
 -- 2. Sarees
 create table if not exists public.sarees (

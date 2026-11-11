@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { colorBg, colorName } from '../components/Swatch'
 import { uploadImage } from '../lib/cloudinary'
 import { PALETTE, type ColorKey } from '../lib/colors'
-import { suggestColors } from '../lib/colorDetect'
+import { prepareSampler, suggestColors } from '../lib/colorDetect'
 import { resizeImage } from '../lib/image'
 import { createSaree, fetchStorageSpots } from '../lib/sarees'
 import type { Blouse } from '../lib/types'
@@ -33,6 +33,9 @@ export default function AddSaree() {
   const [body, setBody] = useState<ColorKey | null>(null)
   const [border, setBorder] = useState<ColorKey | null>(null)
   const touched = useRef({ body: false, border: false })
+  const [sampler, setSampler] = useState<((fx: number, fy: number) => ColorKey) | null>(null)
+  const [picking, setPicking] = useState<'body' | 'border'>('body')
+  const [marks, setMarks] = useState<{ body?: [number, number]; border?: [number, number] }>({})
 
   const [name, setName] = useState('')
   const [fabric, setFabric] = useState('')
@@ -72,6 +75,14 @@ export default function AddSaree() {
         if (!touched.current.border && keys[1]) setBorder(keys[1])
       })
       .catch(() => setSuggested([]))
+    prepareSampler(coverFile)
+      .then((fn) => {
+        if (cancelled) return
+        setSampler(() => fn)
+        setMarks({})
+        setPicking('body')
+      })
+      .catch(() => setSampler(null))
     return () => {
       cancelled = true
     }
@@ -95,6 +106,24 @@ export default function AddSaree() {
 
   function makeCover(id: string) {
     setPhotos((p) => [...p.filter((x) => x.id === id), ...p.filter((x) => x.id !== id)])
+  }
+
+  function pickFromPhoto(e: React.MouseEvent<HTMLImageElement>) {
+    if (!sampler) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const fx = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+    const fy = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height))
+    const key = sampler(fx, fy)
+    if (picking === 'body') {
+      touched.current.body = true
+      setBody(key)
+      setMarks((m) => ({ ...m, body: [fx, fy] }))
+      setPicking('border')
+    } else {
+      touched.current.border = true
+      setBorder(key)
+      setMarks((m) => ({ ...m, border: [fx, fy] }))
+    }
   }
 
   function toggleOccasion(o: string) {
@@ -188,9 +217,53 @@ export default function AddSaree() {
         <p className="mt-2 text-xs text-muted">Tip: full drape, border close-up, pallu. Photos are shrunk before upload.</p>
 
         <SectionTitle>Colours</SectionTitle>
-        <p className="-mt-1.5 mb-2.5 text-[13px] text-muted">
-          {suggested.length ? 'Suggested from your cover photo. Tap to change.' : 'Add a photo for suggestions, or pick below.'}
-        </p>
+        {photos[0] ? (
+          <div className="mb-4">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-[13px] text-[#4a4a4a]">Tap the photo to pick</span>
+              {(['body', 'border'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={picking === m}
+                  onClick={() => setPicking(m)}
+                  className={`h-9 rounded-full border px-3.5 text-[13px] capitalize ${picking === m ? 'border-ink bg-ink font-semibold text-white' : 'border-[#d6d6d2] text-[#3a3a3a]'}`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+            <div className="relative mx-auto w-3/4">
+              <img
+                src={photos[0].preview}
+                alt="Cover photo — tap to pick a colour"
+                onClick={pickFromPhoto}
+                className={`block h-auto w-full rounded-xl ${sampler ? 'cursor-crosshair' : ''}`}
+              />
+              {(['body', 'border'] as const).map((m) => {
+                const pt = marks[m]
+                const key = m === 'body' ? body : border
+                if (!pt) return null
+                return (
+                  <span
+                    key={m}
+                    aria-hidden="true"
+                    className="pointer-events-none absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1"
+                    style={{ left: `${pt[0] * 100}%`, top: `${pt[1] * 100}%` }}
+                  >
+                    <span className="h-6 w-6 rounded-full border-[3px] border-white shadow-[0_0_0_1.5px_#1a1a1a,0_2px_6px_rgba(0,0,0,0.35)]" style={{ background: colorBg(key) }} />
+                    <span className="rounded-md bg-black/65 px-1.5 py-0.5 text-[11px] font-semibold text-white capitalize">{m}</span>
+                  </span>
+                )
+              })}
+            </div>
+            <p className="mt-2 text-center text-xs text-muted">
+              {picking === 'body' ? 'Tap the main fabric of the saree.' : 'Now tap the border.'}
+            </p>
+          </div>
+        ) : (
+          <p className="-mt-1.5 mb-2.5 text-[13px] text-muted">Add a photo for suggestions, or pick below.</p>
+        )}
         <ColorRow
           label="Body"
           value={body}
