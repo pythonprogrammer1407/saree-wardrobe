@@ -54,10 +54,13 @@ create table if not exists public.saree_images (
 );
 
 create index if not exists saree_images_saree_idx on public.saree_images (saree_id, position);
+create index if not exists saree_images_owner_idx on public.saree_images (owner);
 
 -- 4. Keep updated_at fresh
 create or replace function public.touch_updated_at() returns trigger
-language plpgsql as $$
+language plpgsql
+set search_path = ''
+as $$
 begin
   new.updated_at = now();
   return new;
@@ -79,12 +82,12 @@ create policy "colors readable when logged in" on public.colors
 drop policy if exists "own sarees" on public.sarees;
 create policy "own sarees" on public.sarees
   for all to authenticated
-  using (owner = auth.uid()) with check (owner = auth.uid());
+  using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
 
 drop policy if exists "own images" on public.saree_images;
 create policy "own images" on public.saree_images
   for all to authenticated
-  using (owner = auth.uid()) with check (owner = auth.uid());
+  using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
 
 -- Later phase ("Find this saree"): enable the pgvector extension and add an
 -- embedding column to saree_images. Not needed yet.
