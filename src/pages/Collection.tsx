@@ -1,38 +1,53 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import FilterSheet from '../components/FilterSheet'
 import SareePhoto from '../components/SareePhoto'
-import { colorBg, Dot } from '../components/Swatch'
+import { colorBg, colorName, Dot } from '../components/Swatch'
 import { signOut } from '../lib/auth'
 import { PALETTE, type ColorKey } from '../lib/colors'
+import { activeCount, applyFilters, EMPTY_FILTERS, recallFilters, rememberFilters, type Filters } from '../lib/filters'
 import { fetchSarees, wornLabel } from '../lib/sarees'
 import type { Saree } from '../lib/types'
 
-type ColorFilter = ColorKey | 'all'
-
 const ALL_BG = 'conic-gradient(#b3202a, #c9962b, #3f7d3a, #1f7a78, #2f5aa8, #6a3d8f, #e07a9a, #b3202a)'
+const BLOUSE_LABEL = { stitched: 'Stitched blouse', unstitched: 'Unstitched blouse', none: 'No blouse' } as const
 
 export default function Collection() {
   const [sarees, setSarees] = useState<Saree[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [color, setColor] = useState<ColorFilter>('all')
-  const [query, setQuery] = useState('')
+  const [filters, setFiltersState] = useState<Filters>(recallFilters)
+  const [sheetOpen, setSheetOpen] = useState(false)
+
+  const setFilters = useCallback((next: Filters) => {
+    rememberFilters(next)
+    setFiltersState(next)
+  }, [])
+  const closeSheet = useCallback(() => setSheetOpen(false), [])
 
   useEffect(() => {
     fetchSarees().then(setSarees).catch((e: Error) => setError(e.message))
   }, [])
 
-  const shown = useMemo(() => {
-    if (!sarees) return []
-    const q = query.trim().toLowerCase()
-    return sarees.filter((s) => {
-      if (color !== 'all' && s.body_color !== color && s.border_color !== color) return false
-      if (!q) return true
-      return [s.name, s.fabric, s.weave, s.stored_in, ...s.occasions].some((v) => v?.toLowerCase().includes(q))
-    })
-  }, [sarees, color, query])
-
+  const shown = useMemo(() => (sarees ? applyFilters(sarees, filters) : []), [sarees, filters])
   const total = sarees?.length ?? 0
-  const filtering = color !== 'all' || query.trim() !== ''
+  const nActive = activeCount(filters)
+  const filtering = nActive > 0 || filters.query.trim() !== ''
+
+  // The colour strip is a shortcut: tap one colour to show only it, tap again (or All) to clear.
+  function pickStripColor(k: ColorKey | 'all') {
+    if (k === 'all') return setFilters({ ...filters, colors: [] })
+    const only = filters.colors.length === 1 && filters.colors[0] === k
+    setFilters({ ...filters, colors: only ? [] : [k] })
+  }
+
+  // One removable chip per active value, so it's always clear what's being filtered.
+  const chips: { label: string; remove: () => void }[] = [
+    ...filters.colors.map((c) => ({ label: colorName(c), remove: () => setFilters({ ...filters, colors: filters.colors.filter((x) => x !== c) }) })),
+    ...filters.fabrics.map((v) => ({ label: v, remove: () => setFilters({ ...filters, fabrics: filters.fabrics.filter((x) => x !== v) }) })),
+    ...filters.occasions.map((v) => ({ label: v, remove: () => setFilters({ ...filters, occasions: filters.occasions.filter((x) => x !== v) }) })),
+    ...filters.blouses.map((v) => ({ label: BLOUSE_LABEL[v], remove: () => setFilters({ ...filters, blouses: filters.blouses.filter((x) => x !== v) }) })),
+    ...filters.places.map((v) => ({ label: v, remove: () => setFilters({ ...filters, places: filters.places.filter((x) => x !== v) }) })),
+  ]
 
   return (
     <main className="mx-auto min-h-dvh max-w-md pb-10">
@@ -55,8 +70,8 @@ export default function Collection() {
             type="search"
             aria-label="Search sarees"
             placeholder="Search name, fabric, almirah…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={filters.query}
+            onChange={(e) => setFilters({ ...filters, query: e.target.value })}
             className="flex-1 bg-transparent text-[15px] text-ink outline-none"
           />
         </label>
@@ -66,10 +81,50 @@ export default function Collection() {
       </div>
 
       <div className="flex gap-2.5 overflow-x-auto px-4 pt-3.5 pb-1.5 [scrollbar-width:none]">
-        <ColorButton label="All" bg={ALL_BG} active={color === 'all'} onClick={() => setColor('all')} />
+        <ColorButton label="All" bg={ALL_BG} active={filters.colors.length === 0} onClick={() => pickStripColor('all')} />
         {PALETTE.map((p) => (
-          <ColorButton key={p.key} label={p.name} bg={colorBg(p.key)} active={color === p.key} onClick={() => setColor(p.key)} />
+          <ColorButton key={p.key} label={p.name} bg={colorBg(p.key)} active={filters.colors.includes(p.key)} onClick={() => pickStripColor(p.key)} />
         ))}
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto px-4 pt-2.5 pb-1 [scrollbar-width:none]">
+        <button
+          type="button"
+          onClick={() => setSheetOpen(true)}
+          className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium ${nActive ? 'border-ink bg-ink text-white' : 'border-ink'}`}
+        >
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M4 6h16M7 12h10M10 18h4" />
+          </svg>
+          Filters{nActive ? ` · ${nActive}` : ''}
+        </button>
+        <button
+          type="button"
+          aria-pressed={filters.notWornLately}
+          onClick={() => setFilters({ ...filters, notWornLately: !filters.notWornLately })}
+          className={`h-9 shrink-0 rounded-full border px-3.5 text-[13px] ${filters.notWornLately ? 'border-ink bg-ink font-semibold text-white' : 'border-[#dedede] text-[#3a3a3a]'}`}
+        >
+          Not worn lately
+        </button>
+        {chips.map((c) => (
+          <button
+            key={c.label}
+            type="button"
+            onClick={c.remove}
+            aria-label={`Remove filter ${c.label}`}
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-soft px-3.5 text-[13px] text-ink"
+          >
+            {c.label}
+            <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        ))}
+        {filtering && (
+          <button type="button" onClick={() => setFilters(EMPTY_FILTERS)} className="h-9 shrink-0 px-2 text-[13px] text-muted underline">
+            Clear
+          </button>
+        )}
       </div>
 
       {error && (
@@ -89,7 +144,12 @@ export default function Collection() {
       )}
 
       {total > 0 && shown.length === 0 && (
-        <p className="px-8 py-12 text-center text-sm text-muted">No sarees match. Try another colour or search.</p>
+        <div className="px-8 py-12 text-center">
+          <p className="text-sm text-muted">No sarees match these filters.</p>
+          <button type="button" onClick={() => setFilters(EMPTY_FILTERS)} className="mt-3 h-11 rounded-full border border-ink px-5 text-sm font-medium">
+            Clear filters
+          </button>
+        </div>
       )}
 
       <ul className="grid grid-cols-2 gap-x-3 gap-y-5 px-4 pt-3.5">
@@ -102,9 +162,7 @@ export default function Collection() {
                 <div className="mt-1 flex items-center gap-1.5">
                   <Dot color={s.body_color} />
                   <Dot color={s.border_color} />
-                  <span className="truncate text-xs text-muted">
-                    {[s.fabric, wornLabel(s.last_worn)].filter(Boolean).join(' · ')}
-                  </span>
+                  <span className="truncate text-xs text-muted">{[s.fabric, wornLabel(s.last_worn)].filter(Boolean).join(' · ')}</span>
                 </div>
               </div>
             </Link>
@@ -117,6 +175,18 @@ export default function Collection() {
           Sign out
         </button>
       </div>
+
+      {sheetOpen && sarees && (
+        <FilterSheet
+          sarees={sarees}
+          initial={filters}
+          onClose={closeSheet}
+          onApply={(f) => {
+            setFilters(f)
+            setSheetOpen(false)
+          }}
+        />
+      )}
     </main>
   )
 }
@@ -127,7 +197,7 @@ function ColorButton({ label, bg, active, onClick }: { label: string; bg: string
       <span className={`flex h-11 w-11 items-center justify-center rounded-full border-2 ${active ? 'border-ink' : 'border-transparent'}`}>
         <span className="h-[34px] w-[34px] rounded-full shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]" style={{ background: bg }} />
       </span>
-      <span className={`text-xs ${active ? 'font-semibold text-ink' : 'text-[#5c5c5c]'}`}>{label}</span>
+      <span className={`text-center text-xs leading-tight ${active ? 'font-semibold text-ink' : 'text-[#5c5c5c]'}`}>{label}</span>
     </button>
   )
 }

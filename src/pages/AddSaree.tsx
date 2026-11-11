@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { colorBg, colorName } from '../components/Swatch'
 import { imageUrl, uploadImage } from '../lib/cloudinary'
+import { FABRICS, OCCASIONS } from '../lib/filters'
 import { PALETTE, type ColorKey } from '../lib/colors'
 import { prepareSampler, suggestColors } from '../lib/colorDetect'
 import { resizeImage } from '../lib/image'
@@ -9,8 +10,6 @@ import { createSaree, fetchStorageSpots, updateSaree } from '../lib/sarees'
 import type { Blouse, Saree } from '../lib/types'
 
 const MAX_PHOTOS = 6
-const FABRICS = ['Silk', 'Cotton', 'Cotton silk', 'Linen', 'Georgette', 'Chiffon', 'Organza', 'Tussar', 'Crepe', 'Net', 'Other']
-const OCCASIONS = ['Wedding', 'Festive', 'Office', 'Casual', 'Party']
 const BLOUSES: { value: Blouse; label: string }[] = [
   { value: 'stitched', label: 'Stitched' },
   { value: 'unstitched', label: 'Unstitched' },
