@@ -116,3 +116,14 @@ export async function prepareSampler(file: Blob): Promise<(fx: number, fy: numbe
     return colourful && colourful[1] / total >= 0.2 ? colourful[0] : ranked[0][0]
   }
 }
+
+const LAB_BY_KEY = new Map<ColorKey, Lab>(PALETTE_LAB.map((p) => [p.key, p.lab]))
+
+/** How different two palette colours look (CIE76 ΔE). 0 = same; under ~25 reads as "close". */
+export function paletteDistance(a: ColorKey, b: ColorKey): number {
+  if (a === b) return 0
+  const la = LAB_BY_KEY.get(a)
+  const lb = LAB_BY_KEY.get(b)
+  if (!la || !lb) return Infinity // "multi" only matches itself
+  return dist(la, lb)
+}

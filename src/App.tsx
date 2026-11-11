@@ -6,6 +6,7 @@ import AddSaree from './pages/AddSaree'
 import Collection from './pages/Collection'
 import EditSaree from './pages/EditSaree'
 import Login from './pages/Login'
+import PhotoSearch from './pages/PhotoSearch'
 import Placeholder from './pages/Placeholder'
 import SareeDetail from './pages/SareeDetail'
 import SetupNeeded from './pages/SetupNeeded'
@@ -33,7 +34,7 @@ function Gate() {
         <Route path="/saree/:id" element={<SareeDetail />} />
         <Route path="/saree/:id/edit" element={<EditSaree />} />
         <Route path="/add" element={<AddSaree />} />
-        <Route path="/search-photo" element={<Placeholder title="Search by photo" />} />
+        <Route path="/search-photo" element={<PhotoSearch />} />
         <Route path="*" element={<Placeholder title="Not found" />} />
       </Routes>
     </HashRouter>
