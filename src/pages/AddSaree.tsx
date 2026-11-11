@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { colorBg, colorName } from '../components/Swatch'
-import { uploadImage } from '../lib/cloudinary'
+import { imageUrl, uploadImage } from '../lib/cloudinary'
 import { PALETTE, type ColorKey } from '../lib/colors'
 import { prepareSampler, suggestColors } from '../lib/colorDetect'
 import { resizeImage } from '../lib/image'
-import { createSaree, fetchStorageSpots } from '../lib/sarees'
-import type { Blouse } from '../lib/types'
+import { createSaree, fetchStorageSpots, updateSaree } from '../lib/sarees'
+import type { Blouse, Saree } from '../lib/types'
 
 const MAX_PHOTOS = 6
 const FABRICS = ['Silk', 'Cotton', 'Cotton silk', 'Linen', 'Georgette', 'Chiffon', 'Organza', 'Tussar', 'Crepe', 'Net', 'Other']
@@ -17,41 +17,63 @@ const BLOUSES: { value: Blouse; label: string }[] = [
   { value: 'none', label: 'None' },
 ]
 
+/** A photo on the form: either a new local file, or one already stored in Cloudinary. */
 interface Photo {
   id: string
-  file: File
   preview: string
+  file?: File
+  publicId?: string
 }
 
 export default function AddSaree() {
+  return <SareeForm />
+}
+
+/** Add form, or edit form when `initial` is given. */
+export function SareeForm({ initial }: { initial?: Saree }) {
   const navigate = useNavigate()
   const cameraInput = useRef<HTMLInputElement>(null)
   const galleryInput = useRef<HTMLInputElement>(null)
 
-  const [photos, setPhotos] = useState<Photo[]>([])
+  const [photos, setPhotos] = useState<Photo[]>(() =>
+    (initial?.saree_images ?? []).map((img) => ({
+      id: img.id,
+      publicId: img.public_id,
+      preview: imageUrl(img.public_id, 'detail'),
+    })),
+  )
   const [suggested, setSuggested] = useState<ColorKey[]>([])
-  const [body, setBody] = useState<ColorKey | null>(null)
-  const [border, setBorder] = useState<ColorKey | null>(null)
-  const touched = useRef({ body: false, border: false })
+  const [body, setBody] = useState<ColorKey | null>(initial?.body_color ?? null)
+  const [border, setBorder] = useState<ColorKey | null>(initial?.border_color ?? null)
+  // When editing, keep the saved colours unless the person picks new ones.
+  const touched = useRef({
+    body: Boolean(initial?.body_color),
+    border: Boolean(initial?.border_color),
+  })
   const [sampler, setSampler] = useState<((fx: number, fy: number) => ColorKey) | null>(null)
   const [picking, setPicking] = useState<'body' | 'border'>('body')
-  const [marks, setMarks] = useState<{ body?: [number, number]; border?: [number, number] }>({})
+  const [marks, setMarks] = useState<{
+    body?: [number, number]
+    border?: [number, number]
+  }>({})
 
-  const [name, setName] = useState('')
-  const [fabric, setFabric] = useState('')
-  const [weave, setWeave] = useState('')
-  const [occasions, setOccasions] = useState<string[]>([])
-  const [blouse, setBlouse] = useState<Blouse | null>(null)
-  const [storedIn, setStoredIn] = useState('')
-  const [source, setSource] = useState('')
-  const [lastWorn, setLastWorn] = useState('')
+  const [name, setName] = useState(initial?.name ?? '')
+  const [fabric, setFabric] = useState(initial?.fabric ?? '')
+  const [weave, setWeave] = useState(initial?.weave ?? '')
+  const [occasions, setOccasions] = useState<string[]>(initial?.occasions ?? [])
+  const [blouse, setBlouse] = useState<Blouse | null>(initial?.blouse ?? null)
+  const [storedIn, setStoredIn] = useState(initial?.stored_in ?? '')
+  const [source, setSource] = useState(initial?.source ?? '')
+  const [lastWorn, setLastWorn] = useState(initial?.last_worn ?? '')
   const [spots, setSpots] = useState<string[]>([])
 
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchStorageSpots().then(setSpots).catch(() => {})
+    fetchStorageSpots()
+      .then(setSpots)
+      .catch(() => {})
   }, [])
 
   // Free preview URLs when leaving the screen.
@@ -59,39 +81,50 @@ export default function AddSaree() {
   useEffect(() => {
     photosRef.current = photos
   }, [photos])
-  useEffect(() => () => photosRef.current.forEach((p) => URL.revokeObjectURL(p.preview)), [])
+  useEffect(() => () => photosRef.current.forEach((p) => p.file && URL.revokeObjectURL(p.preview)), [])
 
   // Re-suggest colours whenever the cover photo changes.
-  const coverFile = photos[0]?.file
+  const coverLocal = photos[0]?.file
+  const coverRemote = photos[0]?.publicId
   useEffect(() => {
-    if (!coverFile) return
+    if (!coverLocal && !coverRemote) return
     let cancelled = false
-    suggestColors(coverFile)
-      .then((found) => {
+    const load: Promise<Blob> = coverLocal ? Promise.resolve(coverLocal) : fetch(imageUrl(coverRemote!, 'detail')).then((r) => r.blob())
+    load
+      .then((coverFile) => {
         if (cancelled) return
-        const keys = found.map((f) => f.key)
-        setSuggested(keys)
-        if (!touched.current.body && keys[0]) setBody(keys[0])
-        if (!touched.current.border && keys[1]) setBorder(keys[1])
-      })
-      .catch(() => setSuggested([]))
-    prepareSampler(coverFile)
-      .then((fn) => {
-        if (cancelled) return
-        setSampler(() => fn)
-        setMarks({})
-        setPicking('body')
+        suggestColors(coverFile)
+          .then((found) => {
+            if (cancelled) return
+            const keys = found.map((f) => f.key)
+            setSuggested(keys)
+            if (!touched.current.body && keys[0]) setBody(keys[0])
+            if (!touched.current.border && keys[1]) setBorder(keys[1])
+          })
+          .catch(() => setSuggested([]))
+        prepareSampler(coverFile)
+          .then((fn) => {
+            if (cancelled) return
+            setSampler(() => fn)
+            setMarks({})
+            setPicking('body')
+          })
+          .catch(() => setSampler(null))
       })
       .catch(() => setSampler(null))
     return () => {
       cancelled = true
     }
-  }, [coverFile])
+  }, [coverLocal, coverRemote])
 
   function addFiles(list: FileList | null) {
     if (!list) return
     const room = MAX_PHOTOS - photos.length
-    const added = [...list].slice(0, room).map((file) => ({ id: crypto.randomUUID(), file, preview: URL.createObjectURL(file) }))
+    const added = [...list].slice(0, room).map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      preview: URL.createObjectURL(file),
+    }))
     setPhotos((p) => [...p, ...added])
     if (list.length > room) setError(`Up to ${MAX_PHOTOS} photos per saree.`)
   }
@@ -99,7 +132,7 @@ export default function AddSaree() {
   function removePhoto(id: string) {
     setPhotos((p) => {
       const gone = p.find((x) => x.id === id)
-      if (gone) URL.revokeObjectURL(gone.preview)
+      if (gone?.file) URL.revokeObjectURL(gone.preview)
       return p.filter((x) => x.id !== id)
     })
   }
@@ -138,27 +171,37 @@ export default function AddSaree() {
     setError(null)
     try {
       const ids: string[] = []
-      for (let i = 0; i < photos.length; i++) {
-        setStatus(`Uploading photo ${i + 1} of ${photos.length}…`)
-        ids.push(await uploadImage(await resizeImage(photos[i].file)))
+      const newCount = photos.filter((p) => p.file).length
+      let uploaded = 0
+      for (const p of photos) {
+        if (p.publicId) {
+          ids.push(p.publicId)
+          continue
+        }
+        uploaded++
+        setStatus(`Uploading photo ${uploaded} of ${newCount}…`)
+        ids.push(await uploadImage(await resizeImage(p.file!)))
       }
       setStatus('Saving…')
-      await createSaree(
-        {
-          name: name.trim() || autoName,
-          fabric: fabric || null,
-          weave: weave.trim() || null,
-          body_color: body,
-          border_color: border,
-          occasions,
-          stored_in: storedIn.trim() || null,
-          blouse,
-          last_worn: lastWorn || null,
-          source: source.trim() || null,
-        },
-        ids,
-      )
-      navigate('/', { replace: true })
+      const fields = {
+        name: name.trim() || autoName,
+        fabric: fabric || null,
+        weave: weave.trim() || null,
+        body_color: body,
+        border_color: border,
+        occasions,
+        stored_in: storedIn.trim() || null,
+        blouse,
+        last_worn: lastWorn || null,
+        source: source.trim() || null,
+      }
+      if (initial) {
+        await updateSaree(initial.id, fields, ids)
+        navigate(`/saree/${initial.id}`, { replace: true })
+      } else {
+        await createSaree(fields, ids)
+        navigate('/', { replace: true })
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
       setStatus(null)
@@ -168,9 +211,18 @@ export default function AddSaree() {
   return (
     <form onSubmit={save} className="mx-auto flex min-h-dvh max-w-md flex-col">
       <header className="sticky top-0 z-10 flex items-center justify-between bg-white py-2 pr-2 pl-4">
-        <h1 className="text-[22px] font-bold tracking-tight">Add saree</h1>
-        <Link to="/" aria-label="Close" className="flex h-11 w-11 items-center justify-center">
-          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+        <h1 className="text-[22px] font-bold tracking-tight">{initial ? 'Edit saree' : 'Add saree'}</h1>
+        <Link to={initial ? `/saree/${initial.id}` : '/'} aria-label="Close" className="flex h-11 w-11 items-center justify-center">
+          <svg
+            aria-hidden="true"
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          >
             <path d="M6 6l12 12M18 6L6 18" />
           </svg>
         </Link>
@@ -183,7 +235,9 @@ export default function AddSaree() {
             <div key={p.id} className="relative aspect-[3/4] overflow-hidden rounded-xl bg-soft">
               <img src={p.preview} alt={`Photo ${i + 1}`} className="h-full w-full object-cover" />
               {i === 0 ? (
-                <span className="absolute top-1.5 left-1.5 rounded-lg bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">Cover</span>
+                <span className="absolute top-1.5 left-1.5 rounded-lg bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">
+                  Cover
+                </span>
               ) : (
                 <button
                   type="button"
@@ -199,7 +253,16 @@ export default function AddSaree() {
                 aria-label={`Remove photo ${i + 1}`}
                 className="absolute top-1 right-1 flex h-8 w-8 items-center justify-center rounded-full bg-white/90"
               >
-                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <svg
+                  aria-hidden="true"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                >
                   <path d="M6 6l12 12M18 6L6 18" />
                 </svg>
               </button>
@@ -212,8 +275,22 @@ export default function AddSaree() {
             </>
           )}
         </div>
-        <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => (addFiles(e.target.files), (e.target.value = ''))} />
-        <input ref={galleryInput} type="file" accept="image/*" multiple hidden onChange={(e) => (addFiles(e.target.files), (e.target.value = ''))} />
+        <input
+          ref={cameraInput}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={(e) => (addFiles(e.target.files), (e.target.value = ''))}
+        />
+        <input
+          ref={galleryInput}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => (addFiles(e.target.files), (e.target.value = ''))}
+        />
         <p className="mt-2 text-xs text-muted">Tip: full drape, border close-up, pallu. Photos are shrunk before upload.</p>
 
         <SectionTitle>Colours</SectionTitle>
@@ -251,7 +328,10 @@ export default function AddSaree() {
                     className="pointer-events-none absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1"
                     style={{ left: `${pt[0] * 100}%`, top: `${pt[1] * 100}%` }}
                   >
-                    <span className="h-6 w-6 rounded-full border-[3px] border-white shadow-[0_0_0_1.5px_#1a1a1a,0_2px_6px_rgba(0,0,0,0.35)]" style={{ background: colorBg(key) }} />
+                    <span
+                      className="h-6 w-6 rounded-full border-[3px] border-white shadow-[0_0_0_1.5px_#1a1a1a,0_2px_6px_rgba(0,0,0,0.35)]"
+                      style={{ background: colorBg(key) }}
+                    />
                     <span className="rounded-md bg-black/65 px-1.5 py-0.5 text-[11px] font-semibold text-white capitalize">{m}</span>
                   </span>
                 )
@@ -264,19 +344,9 @@ export default function AddSaree() {
         ) : (
           <p className="-mt-1.5 mb-2.5 text-[13px] text-muted">Add a photo for suggestions, or pick below.</p>
         )}
-        <ColorRow
-          label="Body"
-          value={body}
-          suggested={suggested}
-          onPick={(k) => ((touched.current.body = true), setBody(k))}
-        />
+        <ColorRow label="Body" value={body} suggested={suggested} onPick={(k) => ((touched.current.body = true), setBody(k))} />
         <div className="h-4" />
-        <ColorRow
-          label="Border"
-          value={border}
-          suggested={suggested}
-          onPick={(k) => ((touched.current.border = true), setBorder(k))}
-        />
+        <ColorRow label="Border" value={border} suggested={suggested} onPick={(k) => ((touched.current.border = true), setBorder(k))} />
 
         <SectionTitle>Details</SectionTitle>
         <div className="flex flex-col gap-3.5">
@@ -293,7 +363,13 @@ export default function AddSaree() {
               </select>
             </Field>
             <Field label="Weave / type">
-              <input type="text" value={weave} onChange={(e) => setWeave(e.target.value)} placeholder="e.g. Kanjivaram" className={inputCls} />
+              <input
+                type="text"
+                value={weave}
+                onChange={(e) => setWeave(e.target.value)}
+                placeholder="e.g. Kanjivaram"
+                className={inputCls}
+              />
             </Field>
           </div>
 
@@ -326,7 +402,14 @@ export default function AddSaree() {
           </div>
 
           <Field label="Stored in">
-            <input type="text" list="spots" value={storedIn} onChange={(e) => setStoredIn(e.target.value)} placeholder="e.g. Almirah 1 · Shelf 2" className={inputCls} />
+            <input
+              type="text"
+              list="spots"
+              value={storedIn}
+              onChange={(e) => setStoredIn(e.target.value)}
+              placeholder="e.g. Almirah 1 · Shelf 2"
+              className={inputCls}
+            />
             <datalist id="spots">
               {spots.map((s) => (
                 <option key={s} value={s} />
@@ -337,7 +420,13 @@ export default function AddSaree() {
             <input type="date" value={lastWorn} onChange={(e) => setLastWorn(e.target.value)} className={`${inputCls} bg-white`} />
           </Field>
           <Field label="Bought / gifted by (optional)">
-            <input type="text" value={source} onChange={(e) => setSource(e.target.value)} placeholder="Shop or person, year" className={inputCls} />
+            <input
+              type="text"
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              placeholder="Shop or person, year"
+              className={inputCls}
+            />
           </Field>
         </div>
 
@@ -349,8 +438,12 @@ export default function AddSaree() {
       </div>
 
       <div className="sticky bottom-0 border-t border-[#eeeeea] bg-white px-4 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-        <button type="submit" disabled={!!status} className="h-13 w-full rounded-full bg-ink text-base font-semibold text-white disabled:opacity-70">
-          {status ?? 'Save saree'}
+        <button
+          type="submit"
+          disabled={!!status}
+          className="h-13 w-full rounded-full bg-ink text-base font-semibold text-white disabled:opacity-70"
+        >
+          {status ?? (initial ? 'Save changes' : 'Save saree')}
         </button>
       </div>
     </form>
@@ -386,24 +479,29 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 }
 
 function ColorRow({ label, value, suggested, onPick }: { label: string; value: ColorKey | null; suggested: ColorKey[]; onPick: (k: ColorKey) => void }) {
-  // Suggested colours first, then the rest of the palette.
-  const order = [...suggested, ...PALETTE.map((p) => p.key).filter((k) => !suggested.includes(k))]
+  // Whole palette always visible, in a fixed order so colours are easy to find. Suggestions get a small dot.
   return (
     <div>
       <div className="mb-2 text-sm font-semibold">
         {label} · <span className="font-normal">{value ? colorName(value) : 'not set'}</span>
       </div>
-      <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none]">
-        {order.map((k) => (
+      <div className="grid grid-cols-6 gap-x-1 gap-y-2">
+        {PALETTE.map(({ key: k }) => (
           <button
             key={k}
             type="button"
             aria-label={colorName(k)}
             aria-pressed={value === k}
             onClick={() => onPick(k)}
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 ${value === k ? 'border-ink' : 'border-transparent'}`}
+            className="flex flex-col items-center gap-0.5"
           >
-            <span className="h-[34px] w-[34px] rounded-full shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]" style={{ background: colorBg(k) }} />
+            <span className={`relative flex h-11 w-11 items-center justify-center rounded-full border-2 ${value === k ? 'border-ink' : 'border-transparent'}`}>
+              <span className="h-[34px] w-[34px] rounded-full shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]" style={{ background: colorBg(k) }} />
+              {suggested.slice(0, 3).includes(k) && value !== k && (
+                <span aria-hidden="true" className="absolute top-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-ink" />
+              )}
+            </span>
+            <span className={`text-[10px] leading-tight ${value === k ? 'font-semibold text-ink' : 'text-[#5c5c5c]'}`}>{colorName(k)}</span>
           </button>
         ))}
       </div>
@@ -418,7 +516,17 @@ function AddTile({ label, onClick, icon }: { label: string; onClick: () => void;
       onClick={onClick}
       className="flex aspect-[3/4] flex-col items-center justify-center gap-1.5 rounded-xl border-[1.5px] border-dashed border-[#b8b8b2] bg-[#fafaf8] text-[13px] text-[#3a3a3a]"
     >
-      <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <svg
+        aria-hidden="true"
+        width="24"
+        height="24"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
         {icon === 'camera' ? (
           <>
             <path d="M4 8h3l2-3h6l2 3h3v11H4z" />

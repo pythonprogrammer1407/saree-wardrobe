@@ -4,8 +4,10 @@ import { isCloudinaryConfigured } from './lib/cloudinary'
 import { isSupabaseConfigured } from './lib/supabase'
 import AddSaree from './pages/AddSaree'
 import Collection from './pages/Collection'
+import EditSaree from './pages/EditSaree'
 import Login from './pages/Login'
 import Placeholder from './pages/Placeholder'
+import SareeDetail from './pages/SareeDetail'
 import SetupNeeded from './pages/SetupNeeded'
 
 export default function App() {
@@ -28,7 +30,8 @@ function Gate() {
     <HashRouter>
       <Routes>
         <Route path="/" element={<Collection />} />
-        <Route path="/saree/:id" element={<Placeholder title="Saree detail" />} />
+        <Route path="/saree/:id" element={<SareeDetail />} />
+        <Route path="/saree/:id/edit" element={<EditSaree />} />
         <Route path="/add" element={<AddSaree />} />
         <Route path="/search-photo" element={<Placeholder title="Search by photo" />} />
         <Route path="*" element={<Placeholder title="Not found" />} />

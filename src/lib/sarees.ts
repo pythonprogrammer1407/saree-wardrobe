@@ -61,3 +61,55 @@ export async function fetchStorageSpots(): Promise<string[]> {
   const { data } = await supabase.from('sarees').select('stored_in').not('stored_in', 'is', null)
   return [...new Set((data ?? []).map((r) => r.stored_in as string))].sort()
 }
+
+export async function fetchSaree(id: string): Promise<Saree | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.from('sarees').select(SELECT).eq('id', id).maybeSingle()
+  if (error) throw error
+  return data ? sortImages(data as Saree) : null
+}
+
+/** Update a saree's fields and replace its photo list (in order; first = cover). */
+export async function updateSaree(id: string, saree: NewSaree, publicIds: string[]): Promise<void> {
+  if (!supabase) throw new Error('Not configured')
+  const { error } = await supabase.from('sarees').update(saree).eq('id', id)
+  if (error) throw error
+  const { error: delErr } = await supabase.from('saree_images').delete().eq('saree_id', id)
+  if (delErr) throw delErr
+  if (publicIds.length) {
+    const rows = publicIds.map((public_id, position) => ({ saree_id: id, public_id, position, is_cover: position === 0 }))
+    const { error: imgErr } = await supabase.from('saree_images').insert(rows)
+    if (imgErr) throw imgErr
+  }
+}
+
+export async function setLastWorn(id: string, date: string | null): Promise<void> {
+  if (!supabase) throw new Error('Not configured')
+  const { error } = await supabase.from('sarees').update({ last_worn: date }).eq('id', id)
+  if (error) throw error
+}
+
+/** Deletes the saree and (via cascade) its photo rows. The image files stay in Cloudinary. */
+export async function deleteSaree(id: string): Promise<void> {
+  if (!supabase) throw new Error('Not configured')
+  const { error } = await supabase.from('sarees').delete().eq('id', id)
+  if (error) throw error
+}
+
+/** Today's date as YYYY-MM-DD in local time. */
+export function todayISO(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** "14 Feb 2026 · 9 months ago" / "Today" / "Never worn" */
+export function wornDetail(lastWorn: string | null): string {
+  if (!lastWorn) return 'Never worn'
+  if (lastWorn === todayISO()) return 'Today'
+  const d = new Date(lastWorn + 'T00:00:00')
+  const date = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  const days = Math.round((Date.now() - d.getTime()) / 86400000)
+  const ago =
+    days < 1 ? 'today' : days < 31 ? `${days} day${days === 1 ? '' : 's'} ago` : days < 365 ? `${Math.round(days / 30)} months ago` : `${(days / 365).toFixed(1).replace('.0', '')} years ago`
+  return `${date} · ${ago}`
+}

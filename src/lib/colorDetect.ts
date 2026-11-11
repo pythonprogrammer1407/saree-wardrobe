@@ -76,14 +76,18 @@ export async function suggestColors(file: Blob): Promise<{ key: ColorKey; share:
     .filter((c) => c.share >= 0.03)
 }
 
+const ZARI_OR_NEUTRAL = new Set<ColorKey>(['gold', 'silver', 'grey', 'black', 'white', 'cream'])
+
 /**
  * Prepare a tap-to-pick sampler for a photo. The returned function takes a tap position
- * as fractions of the image (0–1) and returns the palette colour most common in a small
- * patch around it — a patch vote copes with zari, where neighbouring threads differ.
+ * as fractions of the image (0–1) and returns the palette colour for a patch around it.
+ * The photo is read at 1000px so individual threads stay visible, and when a real colour
+ * makes up at least a fifth of the patch it wins over zari / neutral threads
+ * (a teal border woven with gold zari reads as teal, not gold or grey).
  */
 export async function prepareSampler(file: Blob): Promise<(fx: number, fy: number) => ColorKey> {
   const bitmap = await loadBitmap(file)
-  const w = 300
+  const w = Math.min(1000, bitmap.width)
   const h = Math.max(1, Math.round((bitmap.height * w) / bitmap.width))
   const canvas = document.createElement('canvas')
   canvas.width = w
@@ -96,15 +100,19 @@ export async function prepareSampler(file: Blob): Promise<(fx: number, fy: numbe
   return (fx, fy) => {
     const cx = Math.round(fx * (w - 1))
     const cy = Math.round(fy * (h - 1))
-    const r = 6
+    const r = Math.max(4, Math.round(w / 60))
     const counts = new Map<ColorKey, number>()
+    let total = 0
     for (let y = Math.max(0, cy - r); y <= Math.min(h - 1, cy + r); y++) {
       for (let x = Math.max(0, cx - r); x <= Math.min(w - 1, cx + r); x++) {
         const i = (y * w + x) * 4
         const key = nearestPaletteColor(data[i], data[i + 1], data[i + 2])
         counts.set(key, (counts.get(key) ?? 0) + 1)
+        total++
       }
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1])
+    const colourful = ranked.find(([k]) => !ZARI_OR_NEUTRAL.has(k))
+    return colourful && colourful[1] / total >= 0.2 ? colourful[0] : ranked[0][0]
   }
 }
